@@ -1,18 +1,9 @@
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 const Chat = require('../models/Chat');
+const getTLSCertificates = require('../config/tlsCert.js'); 
 
-// Load RSA keys
-let publicKey, privateKey;
-
-try {
-  publicKey = fs.readFileSync(path.join(__dirname, '../certs/server.crt'), 'utf8');
-  privateKey = fs.readFileSync(path.join(__dirname, '../certs/server.key'), 'utf8');
-} catch (err) {
-  console.error('Error loading RSA keys:', err.message);
-  process.exit(1); // Exit if keys are missing or unreadable
-}
+// Load TLS certificates
+const { key: privateKey, cert: publicKey } = getTLSCertificates();
 
 /**
  * Send a message

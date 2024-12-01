@@ -6,10 +6,6 @@ const getTLSCertificates = () => {
     const certPath = path.resolve(__dirname, '../certs/server.crt');
     const keyPath = path.resolve(__dirname, '../certs/server.key');
 
-    // Debugging logs
-    console.log('Loading certificate from:', certPath);
-    console.log('Loading key from:', keyPath);
-
     return {
       key: fs.readFileSync(keyPath, 'utf8'),
       cert: fs.readFileSync(certPath, 'utf8'),

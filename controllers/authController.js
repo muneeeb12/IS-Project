@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const nodemailer = require('nodemailer');
+const crypto = require('crypto'); // For Diffie-Hellman key generation
 require('dotenv').config();
 
 const otpStorage = {}; // Temporary in-memory OTP storage with expiry
@@ -26,8 +27,8 @@ exports.register = async (req, res) => {
     const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
-        user: process.env.EMAIL_USER, // Email from .env file
-        pass: process.env.EMAIL_PASS, // App password from .env file
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
     });
 
@@ -69,8 +70,18 @@ exports.verifyOTP = async (req, res) => {
     // Clear OTP from storage
     delete otpStorage[email];
 
+    // Generate a Diffie-Hellman key pair
+    const dh = crypto.createDiffieHellman(2048);
+    const publicKey = dh.generateKeys('base64'); // Store as base64
+    const privateKey = dh.getPrivateKey('base64'); // Optional: can store securely
+
     // Create and save the user
-    const newUser = new User({ username, email, password }); // Password is hashed by `pre('save')` hook in the User model
+    const newUser = new User({
+      username,
+      email,
+      password, // Assume hashing in pre-save middleware
+      publicKey, // Save DH public key to database
+    });
     await newUser.save();
 
     res.status(201).json({ message: 'User registered successfully. Please log in.' });
@@ -85,21 +96,14 @@ exports.login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    console.log('Login email:', email);
-    console.log('Login password:', password);
-
     // Find user by email
     const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    console.log('Stored hashed password:', user.password);
-
     // Compare plaintext password with hashed password
     const isMatch = await bcrypt.compare(password, user.password);
-    console.log('Password comparison result:', isMatch);
-
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
@@ -107,8 +111,16 @@ exports.login = async (req, res) => {
     // Generate a JWT
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
 
-    // Respond with token and user details
-    res.json({ token, user: { id: user._id, username: user.username, email: user.email } });
+    // Respond with token, user details, and public key
+    res.json({
+      token,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        publicKey: user.publicKey, // Include user's public key in response
+      },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Server error' });

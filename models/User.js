@@ -18,6 +18,10 @@ const UserSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    publicKey: {
+      type: String,  // Optional: Store user's public key for encryption if needed
+      required: false,
+    },
   },
   { timestamps: true }
 );

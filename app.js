@@ -11,9 +11,9 @@ require('dotenv').config();
 const app = express();
 
 // Middleware
-app.use(express.json());
+app.use(express.json()); // To parse incoming JSON data
 
-// Connect Database
+// Connect to the Database
 connectDB();
 
 // Mount Routes
@@ -22,7 +22,7 @@ app.use('/api/user', userRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/group', groupRoutes);
 
-// Error Handling Middleware
+// Error Handling Middleware (Catch all errors)
 app.use(errorHandler);
 
 module.exports = app;

@@ -1,98 +1,91 @@
+const ChatMessage = require('../models/Chat'); // Assuming the model is named ChatMessage
 const crypto = require('crypto');
-const Chat = require('../models/Chat');
-const getTLSCertificates = require('../config/tlsCert.js'); 
+require('dotenv').config(); // Load environment variables
 
-// Load TLS certificates
-const { key: privateKey, cert: publicKey } = getTLSCertificates();
+// Helper function to encrypt a message
+function encryptMessage(message, secretKey) {
+  const iv = crypto.randomBytes(16); // Generate a random IV
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(secretKey, 'hex'), iv);
 
-/**
- * Send a message
- */
+  let encrypted = cipher.update(message, 'utf-8', 'hex');
+  encrypted += cipher.final('hex');
+
+  return {
+    encryptedMessage: encrypted,
+    iv: iv.toString('hex'), // Convert the IV to a hex string for storage
+  };
+}
+
+// Helper function to decrypt a message
+function decryptMessage(encryptedMessage, iv, secretKey) {
+  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(secretKey, 'hex'), Buffer.from(iv, 'hex'));
+
+  let decrypted = decipher.update(encryptedMessage, 'hex', 'utf-8');
+  decrypted += decipher.final('utf-8');
+
+  return decrypted;
+}
+
+// Send a message
 exports.sendMessage = async (req, res) => {
-  const { recipient, content } = req.body;
-  const sender = req.user.id;
-
-  if (!content || !recipient) {
-    return res.status(400).json({ error: 'Recipient and content are required' });
-  }
-
+  const {  recipientId, content } = req.body;
+  const senderId = req.user.id;
   try {
-    // Encrypt content using RSA with OAEP padding
-    const encryptedContent = crypto.publicEncrypt(
-      {
-        key: publicKey,
-        padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-        oaepHash: 'sha256', // Ensure consistent hash algorithm
-      },
-      Buffer.from(content) // Convert message to Buffer for encryption
-    ).toString('base64'); // Encode as Base64 for safe storage/transmission
+    const secretKey = process.env.SECRET_KEY; // Ensure this is a 256-bit key in hex format
+    if (!secretKey) {
+      return res.status(500).json({ error: 'Encryption key not configured.' });
+    }
 
-    // Create and save the message
-    const newMessage = new Chat({
-      sender,
-      recipient,
-      content: encryptedContent,
+    // Encrypt the message content
+    const { encryptedMessage, iv } = encryptMessage(content, secretKey);
+
+    // Create and save the chat message
+    const newMessage = new ChatMessage({
+      sender: senderId,
+      recipient: recipientId,
+      content: encryptedMessage,
+      iv, // Save the IV
     });
 
     await newMessage.save();
 
-    res.status(201).json({
-      message: 'Message sent successfully',
-      messageId: newMessage._id,
-    });
+    res.status(201).json({ message: 'Message sent successfully!' });
   } catch (err) {
-    console.error('Error while sending message:', err.message);
+    console.error(err);
     res.status(500).json({ error: `Failed to send message: ${err.message}` });
   }
 };
 
-/**
- * Get messages
- */
+// Retrieve chat messages between two users
 exports.getMessages = async (req, res) => {
   const { recipient } = req.params;
-
-  if (!recipient) {
-    return res.status(400).json({ error: 'Recipient is required' });
-  }
-
+  const senderId = req.user.id;
+  console.log(senderId)
   try {
-    // Retrieve messages between the sender and recipient
-    const messages = await Chat.find({
+    const secretKey = process.env.SECRET_KEY; // Ensure this is a 256-bit key in hex format
+    if (!secretKey) {
+      return res.status(500).json({ error: 'Encryption key not configured.' });
+    }
+
+    // Fetch messages between the sender and recipient
+    const messages = await ChatMessage.find({
       $or: [
-        { sender: req.user.id, recipient },
-        { sender: recipient, recipient: req.user.id },
+        { sender: senderId, recipient: recipient },
+        { sender: recipient, recipient: senderId },
       ],
-    }).sort({ createdAt: 1 });
+    }).sort({ sentAt: 1 }); // Sort messages by time
 
-    // Decrypt each message content
-    const decryptedMessages = messages.map((msg) => {
-      try {
-        const decryptedContent = crypto.privateDecrypt(
-          {
-            key: privateKey,
-            padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-            oaepHash: 'sha256', // Ensure consistent hash algorithm
-          },
-          Buffer.from(msg.content, 'base64') // Decode Base64 back to Buffer
-        ).toString('utf8'); // Convert decrypted Buffer to string
-
-        return {
-          ...msg.toObject(),
-          content: decryptedContent,
-        };
-      } catch (decryptionError) {
-        console.error(`Decryption failed for message ${msg._id}:`, decryptionError.message);
-        return {
-          ...msg.toObject(),
-          content: '[Decryption failed]', // Indicate decryption issue
-        };
-      }
-    });
+    // Decrypt the message content
+    const decryptedMessages = messages.map((msg) => ({
+      sender: msg.sender,
+      recipient: msg.recipient,
+      content: decryptMessage(msg.content, msg.iv, secretKey),
+      sentAt: msg.sentAt,
+    }));
 
     res.status(200).json(decryptedMessages);
   } catch (err) {
-    console.error('Error retrieving messages:', err.message);
+    console.error(err);
     res.status(500).json({ error: `Failed to retrieve messages: ${err.message}` });
   }
 };
